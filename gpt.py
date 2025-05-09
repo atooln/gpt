@@ -7,11 +7,12 @@ import matplotlib.pyplot as plt
 HYPER PARAMETERS
 """
 BATCH_SIZE = 32
-BLOCK_SIZE = 8
+BLOCK_SIZE = 100 # 8
 MAX_ITERS = 10000
 EVAL_INTERVAL = 300
 LEARNING_RATE = 1e-3
 EVAL_ITERS = 200
+N_EMBED = 32
 
 torch.manual_seed(1337)
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -86,15 +87,22 @@ def estimate_loss():
 Bigram Language Model
 """
 class BigramLanguageModel(nn.Module):
-    def __init__(self,vocab_size:int):
+    def __init__(self):
         super().__init__()
         # create an embedding matrix 
-        self.token_embedding_table = nn.Embedding(num_embeddings=vocab_size, embedding_dim=vocab_size)
+        self.token_embedding_table = nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBED)
+        self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
+        self.lm_head = nn.Linear(N_EMBED, vocab_size)
 
     def forward(self, idx, targets=None):
+        B,T = idx.shape # Note idx and targets are both of dim (B,T)
         # get data from embedding space
-        logits = self.token_embedding_table(idx) # (B:batch, T:context, C:embedding_dim)
-        
+        token_embed = self.token_embedding_table(idx) # (B,T,C)
+        position_embed = self.position_embedding_table(torch.arange(T,device=DEVICE)) # (T,C)
+        x = token_embed + position_embed # (B,T,C)
+        # since embedding dim < vocab size we need to use a linear layer (lm head) to take the embedding -> logits
+        logits = self.lm_head(x) # (B:batch, T:time, vocab_size)
+
         if targets is None:
             loss = None
         else:
@@ -102,7 +110,7 @@ class BigramLanguageModel(nn.Module):
             B,T,C = logits.shape
             # we want to squash the batches st we can evaluate with cross entropy
             logits = logits.view(B*T,C)
-            targets = targets.view(B*T) # note targets is shape (B:batch, T:context)
+            targets = targets.view(B*T) # note targets is shape (B:batch, T:time)
             # use cross entropy to calculate the loss
             loss = F.cross_entropy(logits, targets)
         return logits, loss
@@ -130,7 +138,7 @@ class BigramLanguageModel(nn.Module):
 Training Loop
 """
 # init model
-model = BigramLanguageModel(vocab_size)
+model = BigramLanguageModel()
 m = model.to(DEVICE)
 # training loop
 optimizer = torch.optim.AdamW(m.parameters(), lr=LEARNING_RATE)
@@ -157,4 +165,4 @@ for step in range(MAX_ITERS):
 
 if __name__ == "__main__":
     context = torch.zeros((1, 1), dtype=torch.long, device=DEVICE)
-    print(decode(m.generate(context, max_new_tokens=500)[0].tolist()))
+    print(decode(m.generate(context, max_new_tokens=100)[0].tolist()))
