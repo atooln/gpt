@@ -114,6 +114,56 @@ class Head(nn.Module):
         return out
 
 
+"""
+Multi head attention
+"""
+class MultHead(nn.Module):
+    def __init__(self, num_heads, head_size):
+        super().__init__()
+        self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        # linear transformation for the final output
+        self.proj = nn.Linear(N_EMBED, N_EMBED)
+    
+    def forward(self, x):
+        out = torch.cat([h(x) for h in self.heads], dim=-1)
+        out = self.proj(out)
+        return out
+
+"""
+MLP
+"""
+class FeedForward(nn.Module):
+    def __init__(self, n_embed):
+        super().__init__()
+
+        # instantiate layers
+        self.net = nn.Sequential(
+            nn.Linear(n_embed, 4*n_embed), # the 4*n_embed replicates the dim of the MLP in the ATTN all u need paper
+            nn.ReLU(),
+            nn.Linear(4*n_embed, n_embed), # projection layer (similar to multihead)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+"""
+Attention Block
+"""
+class Block(nn.Module):
+    def __init__(self, n_embed:int, n_head:int):
+        super().__init__()
+
+        head_size = n_embed//n_head
+        self.ma = MultHead(n_head, head_size)
+        self.ff_mlp = FeedForward(n_embed)
+
+    def forward(self, x):
+        # the x + () part is a residual connection
+        # allows the compution to fork off and add its contribution to the output
+        x = x + self.ma(x)
+        x = x + self.ff_mlp(x)
+        return x
+
 
 """
 Bigram Language Model
@@ -124,8 +174,13 @@ class BigramLanguageModel(nn.Module):
         # create an embedding matrix 
         self.token_embedding_table = nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBED)
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
-        
-        self.sa_head = Head(N_EMBED)
+
+        self.blocks = nn.Sequential(
+            Block(N_EMBED, n_head=4),
+            Block(N_EMBED, n_head=4),
+            Block(N_EMBED, n_head=4),
+        )
+
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -134,7 +189,11 @@ class BigramLanguageModel(nn.Module):
         token_embed = self.token_embedding_table(idx) # (B,T,C)
         position_embed = self.position_embedding_table(torch.arange(T,device=DEVICE)) # (T,C)
         x = token_embed + position_embed # (B,T,C)
-        x = self.sa_head(x)
+        for b in self.blocks:
+            x = b(x)
+        # x = self.sa_head(x) # (B,T,C)
+        # x = self.ff_mlp(x) # (B,T,C)
+
         # since embedding dim < vocab size we need to use a linear layer (lm head) to take the embedding -> logits
         logits = self.lm_head(x) # (B:batch, T:time, vocab_size)
 
