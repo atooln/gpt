@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 HYPER PARAMETERS
 """
 BATCH_SIZE = 32
-BLOCK_SIZE = 100 # 8
+BLOCK_SIZE = 8
 MAX_ITERS = 10000
 EVAL_INTERVAL = 300
 LEARNING_RATE = 1e-3
@@ -83,6 +83,38 @@ def estimate_loss():
     model.train() # set model back to training mode
     return out
 
+
+"""
+Single Head Attention
+"""
+
+class Head(nn.Module):
+    def __init__(self, head_size:int):
+        super().__init__()
+
+        # init attention components
+        self.k = nn.Linear(N_EMBED, head_size, bias=False)
+        self.q = nn.Linear(N_EMBED, head_size, bias=False)
+        self.v = nn.Linear(N_EMBED, head_size, bias=False)
+
+        self.register_buffer('tril', torch.tril(torch.ones(BLOCK_SIZE,BLOCK_SIZE))) # BLOCK_SIZE == T
+
+    def forward(self, x):
+        B,T,C  = x.shape
+        q,k  = self.q(x), self.k(x) # (B,T,C)
+
+        w = q @ k.transpose(-2,-1) * C**-0.5 # (B,T,C) @ (B,C,T) -> (B,T,T)
+
+        w = w.masked_fill(self.tril[:T,:T] == 0, float("-inf")) # (B,T,T)
+        w = F.softmax(w, dim=-1) # (B,T,T)
+
+        v = self.v(x) # (B,T,head_size)
+        out = w @ v  #(B,T, head_size)
+
+        return out
+
+
+
 """
 Bigram Language Model
 """
@@ -92,6 +124,8 @@ class BigramLanguageModel(nn.Module):
         # create an embedding matrix 
         self.token_embedding_table = nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBED)
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
+        
+        self.sa_head = Head(N_EMBED)
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -100,6 +134,7 @@ class BigramLanguageModel(nn.Module):
         token_embed = self.token_embedding_table(idx) # (B,T,C)
         position_embed = self.position_embedding_table(torch.arange(T,device=DEVICE)) # (T,C)
         x = token_embed + position_embed # (B,T,C)
+        x = self.sa_head(x)
         # since embedding dim < vocab size we need to use a linear layer (lm head) to take the embedding -> logits
         logits = self.lm_head(x) # (B:batch, T:time, vocab_size)
 
@@ -119,8 +154,10 @@ class BigramLanguageModel(nn.Module):
     def generate(self, idx, max_new_tokens:int):
         # idx is (B,T) array of indices in our context window
         for _ in range(max_new_tokens):
+            # crops idx to the last blocksize tokens (to prevent out of range)
+            idx_cond = idx[:,-BLOCK_SIZE:]
             # get predictions
-            logits, loss = self(idx)
+            logits, loss = self(idx_cond)
             # go to the last character so that we can get the nxt char prediction for that char
             logits = logits[:,-1,:] # (B,T,C) -> (B,C) @ last element
             probs = F.softmax(logits, dim=-1) # (B,C)
@@ -165,4 +202,4 @@ for step in range(MAX_ITERS):
 
 if __name__ == "__main__":
     context = torch.zeros((1, 1), dtype=torch.long, device=DEVICE)
-    print(decode(m.generate(context, max_new_tokens=100)[0].tolist()))
+    print(decode(m.generate(context, max_new_tokens=1000)[0].tolist()))
