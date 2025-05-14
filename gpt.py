@@ -157,11 +157,15 @@ class Block(nn.Module):
         self.ma = MultHead(n_head, head_size)
         self.ff_mlp = FeedForward(n_embed)
 
+        # layer normalization
+        self.layern1 = nn.LayerNorm(n_embed)
+        self.layern2 = nn.LayerNorm(n_embed)
+
     def forward(self, x):
         # the x + () part is a residual connection
         # allows the compution to fork off and add its contribution to the output
-        x = x + self.ma(x)
-        x = x + self.ff_mlp(x)
+        x = x + self.ma(self.layern1(x))
+        x = x + self.ff_mlp(self.layern2(x))
         return x
 
 
