@@ -6,13 +6,16 @@ import matplotlib.pyplot as plt
 """
 HYPER PARAMETERS
 """
-BATCH_SIZE = 32
-BLOCK_SIZE = 8
-MAX_ITERS = 10000
-EVAL_INTERVAL = 300
-LEARNING_RATE = 1e-3
+BATCH_SIZE = 64
+BLOCK_SIZE = 256
+MAX_ITERS = 5000
+EVAL_INTERVAL = 500
+LEARNING_RATE = 3e-4
 EVAL_ITERS = 200
-N_EMBED = 32
+N_EMBED = 128
+N_LAYERS = 4
+N_HEADS = 4
+DROPOUT = 0.2
 
 torch.manual_seed(1337)
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -99,6 +102,8 @@ class Head(nn.Module):
 
         self.register_buffer('tril', torch.tril(torch.ones(BLOCK_SIZE,BLOCK_SIZE))) # BLOCK_SIZE == T
 
+        self.dropout = nn.Dropout(DROPOUT)
+
     def forward(self, x):
         B,T,C  = x.shape
         q,k  = self.q(x), self.k(x) # (B,T,C)
@@ -107,6 +112,7 @@ class Head(nn.Module):
 
         w = w.masked_fill(self.tril[:T,:T] == 0, float("-inf")) # (B,T,T)
         w = F.softmax(w, dim=-1) # (B,T,T)
+        w = self.dropout(w)
 
         v = self.v(x) # (B,T,head_size)
         out = w @ v  #(B,T, head_size)
@@ -123,10 +129,12 @@ class MultHead(nn.Module):
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
         # linear transformation for the final output
         self.proj = nn.Linear(N_EMBED, N_EMBED)
+        self.dropout = nn.Dropout(DROPOUT)
     
     def forward(self, x):
         out = torch.cat([h(x) for h in self.heads], dim=-1)
         out = self.proj(out)
+        out = self.dropout(out)
         return out
 
 """
@@ -141,6 +149,7 @@ class FeedForward(nn.Module):
             nn.Linear(n_embed, 4*n_embed), # the 4*n_embed replicates the dim of the MLP in the ATTN all u need paper
             nn.ReLU(),
             nn.Linear(4*n_embed, n_embed), # projection layer (similar to multihead)
+            nn.Dropout(DROPOUT),
         )
 
     def forward(self, x):
@@ -161,6 +170,7 @@ class Block(nn.Module):
         self.layern1 = nn.LayerNorm(n_embed)
         self.layern2 = nn.LayerNorm(n_embed)
 
+
     def forward(self, x):
         # the x + () part is a residual connection
         # allows the compution to fork off and add its contribution to the output
@@ -172,18 +182,14 @@ class Block(nn.Module):
 """
 Bigram Language Model
 """
-class BigramLanguageModel(nn.Module):
+class LM(nn.Module):
     def __init__(self):
         super().__init__()
         # create an embedding matrix 
         self.token_embedding_table = nn.Embedding(num_embeddings=vocab_size, embedding_dim=N_EMBED)
         self.position_embedding_table = nn.Embedding(BLOCK_SIZE, N_EMBED)
 
-        self.blocks = nn.Sequential(
-            Block(N_EMBED, n_head=4),
-            Block(N_EMBED, n_head=4),
-            Block(N_EMBED, n_head=4),
-        )
+        self.blocks = nn.Sequential(*[Block(N_EMBED, n_head=N_HEADS) for _ in range(N_LAYERS)])
 
         self.lm_head = nn.Linear(N_EMBED, vocab_size)
 
@@ -238,7 +244,7 @@ class BigramLanguageModel(nn.Module):
 Training Loop
 """
 # init model
-model = BigramLanguageModel()
+model = LM()
 m = model.to(DEVICE)
 # training loop
 optimizer = torch.optim.AdamW(m.parameters(), lr=LEARNING_RATE)
@@ -260,7 +266,7 @@ for step in range(MAX_ITERS):
     loss.backward()
     # update grads
     optimizer.step()
-    #print(loss.item())
+   #print(loss.item())
 
 
 if __name__ == "__main__":
