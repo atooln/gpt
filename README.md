@@ -96,19 +96,3 @@ The following hyperparameters are defined at the beginning of `gpt.py` and contr
     ```bash
     python gpt.py
     ```
-
-Upon execution, the script will:
-
-- Load and process the data from `input.txt`.
-- Initialize the GPT model.
-- Train the model for `MAX_ITERS`, printing training and validation losses at `EVAL_INTERVAL`.
-- After training, generate a sample of 1000 tokens based on an initial context and print it to the console.
-
-## To-Do / Potential Enhancements (Example)
-
-- [ ] Implement weight tying between token embeddings and the final linear layer.
-- [ ] Add command-line arguments for hyperparameters.
-- [ ] Save and load model checkpoints.
-- [ ] More sophisticated sampling methods (e.g., temperature, top-k, nucleus sampling).
-- [ ] Integrate with a dataset from Hugging Face `datasets` or `torchtext`.
-- [ ] Use Matplotlib to plot training/validation loss curves.
